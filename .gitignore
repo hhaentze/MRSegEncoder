@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+*.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+*.pytest_cache/
+.pytest_cache/
+hypothesis/
+
+# PyCharm / VSCode project files
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Machine learning artifacts
+models/
+checkpoints/
+*.h5
+*.hdf5
+*.ckpt
+*.pb
+*.onnx
+*.tflite
+
+# Large datasets
+data/
+*.csv
+*.tsv
+*.parquet
+*.json
+*.zip
+*.gz
+
+# Results and outputs
+outputs/
+results/
+runs/
+
+# Environment variables
+.env
+*.secrets
