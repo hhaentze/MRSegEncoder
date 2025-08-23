@@ -38,6 +38,7 @@ def spatial_compress(x, compression_factor=2):
         raise ValueError(f"Input feature dimension {x.shape[0]} must be divisible by {compression_factor}.")
     
     x = torch.squeeze(x)  # Ensure x is a 4D tensor [320, 4, 4, 4]
+    assert x.shape == (320, 4, 4, 4), f"Unexpected input shape: {x.shape}, expected [320, 4, 4, 4]"
 
     # Save original dtype
     orig_dtype = x.dtype
@@ -180,31 +181,7 @@ def encode(image, verbose: bool = False, compression_factor=2):
     global encoder
 
     img, props, itk_image  = SimpleITKIO().transform_image(image,verbose=verbose,force_spacing=True)
-    # # initialize weights directory
-    # config.setup_mrseg()
-
-    # # initialize encoder
-    # encoder = Encoder(
-    #     tile_step_size=1,
-    #     use_gaussian=False,
-    #     use_mirroring=False,
-    #     device=torch.device("cpu") if not torch.cuda.is_available() else torch.device("cuda", 0),
-    #     verbose=False,
-    #     verbose_preprocessing=False,
-    #     allow_tqdm=False,
-    # )
-
-    # # initialize the network architecture, load the checkpoints
-    # encoder.initialize_from_trained_model_folder(
-    #     config.get_weights_dir(),
-    #     use_folds=[0],
-    #     checkpoint_name="checkpoint_final.pth",
-    # )
-
-    # # remove decoder parts
-    # encoder = remove_decoder(encoder)
-
-    # inference
+    
     try:
         embeddings, coordinates = encoder.predict_single_npy_array(img, props)
     except ValueError as e:
@@ -214,185 +191,16 @@ def encode(image, verbose: bool = False, compression_factor=2):
     # reduce embedding size from     to 320]
     small_embeddings = []
     for i in range(len(coordinates)):
-        #gap = F.adaptive_avg_pool3d(embeddings[i], 1).view(1, 320)
-        # gmp = F.adaptive_max_pool3d(embeddings[i], 1).view(1, 320)
-        # x = torch.cat([gap, gmp], dim=1)
-
-        # # 1) Split along depth
-        # x1, x2 = (
-        #     embeddings[i][:, :, :3, :, :],
-        #     embeddings[i][:, :, 3:, :, :],
-        # )  # both are [B, 320, 3, 4, 5]
-
-        # # 2) Average-pool each half
-        # gap1 = F.adaptive_avg_pool3d(x1, 1).view(1, 320)  # “top” summary
-        # gap2 = F.adaptive_avg_pool3d(x2, 1).view(1, 320)  # “bottom” summary
-
-        # # 3) Concatenate
-        # pooled = torch.cat([gap1, gap2], dim=1)  # → [1, 640]
-
-        # small_embeddings += [pooled[0].tolist()]
-        if verbose: print("DEBUG: embeddings shape:", embeddings[i].shape)
+    
+        if verbose: print("Initial embeddings shape:", embeddings[i].shape)
         spatial_embedding = spatial_compress(embeddings[i][0], compression_factor)
-        if verbose: print("DEBUG: spatial_embedding shape:", spatial_embedding.shape, type(spatial_embedding))
+        if verbose: print("Reduced embedding shape:", spatial_embedding.shape, type(spatial_embedding))
         small_embeddings += [spatial_embedding.tolist()]
 
     # return only first slice
-
     if verbose: print(f"Extracted {len(small_embeddings)} embeddings")
     return small_embeddings[0]
 
-
-
-def infer(
-    img_path: str,
-    outdir: str,
-    fold: int = 0,
-    verbose: bool = False,
-    cpu_only: bool = False,
-    return_results: bool = False,
-    is_pathology_wsi: bool = False,
-) -> None:
-    global encoder
-    
-
-    # make output directory
-    if not return_results:
-        Path(outdir).mkdir(exist_ok=True)
-
-    # # initialize encoder
-    # encoder = Encoder(
-    #     tile_step_size=1,
-    #     use_gaussian=False,
-    #     use_mirroring=False,
-    #     device=torch.device("cpu") if cpu_only else torch.device("cuda", 0),
-    #     verbose=verbose,
-    #     verbose_preprocessing=verbose,
-    #     allow_tqdm=True,
-    # )
-
-    # # initialize the network architecture, load the checkpoints
-    # encoder.initialize_from_trained_model_folder(
-    #     config.get_weights_dir(),
-    #     use_folds=[fold],
-    #     checkpoint_name="checkpoint_final.pth",
-    # )
-
-    # # remove decoder parts
-    # encoder = remove_decoder(encoder)
-
-    # load image
-    img, props, itk_image = SimpleITKIO().read_image(
-        img_path, verbose=True, is_pathology_wsi=is_pathology_wsi
-    )
-
-    # inference
-    embeddings, coordinates = encoder.predict_single_npy_array(img, props)
-
-    # reduce embedding size from [320, 6, 4, 5] to [640]
-    small_embeddings = []
-    for i in range(len(coordinates)):
-        gap = F.adaptive_avg_pool3d(embeddings[i], 1).view(1, 320)
-        gmp = F.adaptive_max_pool3d(embeddings[i], 1).view(1, 320)
-        x = torch.cat([gap, gmp], dim=1) # → [1, 640]
-        small_embeddings += [x[0].tolist()]
-        # # 1) Split along depth
-        # x1, x2 = (
-        #     embeddings[i][:, :, :3, :, :],
-        #     embeddings[i][:, :, 3:, :, :],
-        # )  # both are [B, 320, 3, 4, 5]
-
-        # # 2) Average-pool each half
-        # gap1 = F.adaptive_avg_pool3d(x1, 1).view(1, 320)  # “top” summary
-        # gap2 = F.adaptive_avg_pool3d(x2, 1).view(1, 320)  # “bottom” summary
-
-        # # 3) Concatenate
-        # pooled = torch.cat([gap1, gap2], dim=1)  # → [1, 640]
-
-        # small_embeddings += [pooled[0].tolist()]
-
-    # inverse coordinate positions
-    # (the current coordinates are for numpy arrays. However, when I transformed the
-    # sitk image to an array I implicitely changed the dimensons from x,y,z to z,y,x.
-    # Consequently, I need to reverse them again to make it compatible with sitk)
-    patch_size = [64,64,64]
-    coordinates = [coord for coord in coordinates]
-
-    title = ntpath.basename(img_path)
-
-    # transform coordinates to real world values
-    new_coords = []
-
-    for start_coords in coordinates:
-
-        x, y, z = start_coords
-
-        if is_pathology_wsi:
-            matrix_coordinates = (
-                (x, y),
-                (x + patch_size[0], y + patch_size[1]),
-            )
-        else:
-            matrix_coordinates = (
-                start_coords,
-                (x + patch_size[0], y + patch_size[1], z + patch_size[2]),
-            )
-
-        world_coordinates = tuple(
-            itk_image.TransformIndexToPhysicalPoint(coord) for coord in matrix_coordinates
-        )
-        new_coords.append(world_coordinates)
-
-    # create patches
-    patches = []
-    for i, coord in enumerate(new_coords):
-        patches += [
-            {
-                "features": small_embeddings[i],
-                "coordinates": list(coord[0]),
-            }
-        ]
-    # combine with meta
-    patch_level_neural_representation = make_patch_level_neural_representation(
-        patch_features=patches,
-        patch_size=patch_size,
-        patch_spacing=[1.0, 1.0, 1.0],
-        image_size=itk_image.GetSize(),
-        image_origin=itk_image.GetOrigin(),
-        image_spacing=itk_image.GetSpacing(),
-        image_direction=itk_image.GetDirection(),
-        title="patch-level-neural-representation",
-    )
-
-    center_id = most_centered_tuple_index(coordinates)
-    image_level_neural_representation = {
-        "title": title,
-        "features": small_embeddings[center_id],
-    }
-    if return_results:
-        return image_level_neural_representation, patch_level_neural_representation
-
-    # save
-    with open(join(outdir, "patch-neural-representation.json"), "w") as f:
-        json.dump(
-            [patch_level_neural_representation],
-            f,
-            indent=4,
-        )
-
-    # save central patch for single patch tasks
-    center_id = most_centered_tuple_index(coordinates)
-    with open(join(outdir, "image-neural-representation.json"), "w") as f:
-        json.dump(
-            [
-                {
-                    "title": title,
-                    "features": small_embeddings[center_id],
-                }
-            ],
-            f,
-            indent=4,
-        )
 
 # initialize the static encoder
 print("Initializing static encoder...")
