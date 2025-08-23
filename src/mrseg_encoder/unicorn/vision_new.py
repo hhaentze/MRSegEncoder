@@ -16,18 +16,17 @@ from picai_prep.preprocessing import PreprocessingSettings, Sample
 from tqdm import tqdm
 from unicorn_baseline.io import resolve_image_path
 
-DEBUG = False
+DEBUG = True
+INPUT_PATH = Path("/input")
+OUTPUT_PATH = Path("/output")
+MODEL_PATH = Path("/opt/ml/model")
 
-if DEBUG:
-    INPUT_PATH = Path("/input")
-    OUTPUT_PATH = Path("/output")
-    MODEL_PATH = Path("/opt/ml/model")
-
-    def init(input_path, output_path, model_path):
-        global INPUT_PATH, OUTPUT_PATH, MODEL_PATH
-        INPUT_PATH = Path(input_path)
-        OUTPUT_PATH = Path(output_path)
-        MODEL_PATH = Path(model_path)
+# for debugging only
+def init(input_path, output_path, model_path):
+    global INPUT_PATH, OUTPUT_PATH, MODEL_PATH
+    INPUT_PATH = Path(input_path)
+    OUTPUT_PATH = Path(output_path)
+    MODEL_PATH = Path(model_path)
 
 def write_json_file(*, location, content):
 
@@ -201,10 +200,7 @@ def run_radiology_vision_task(
         for image_input in image_inputs:
 
             if DEBUG:
-                image_dir = Path(os.path.join(
-                    INPUT_PATH,
-                    str(image_input["input_location"]),
-                ))
+                image_dir = Path(str(INPUT_PATH) + str(image_input["input_location"]).replace("input/",""))
             else:
                 image_dir = Path(image_input["input_location"])
 
@@ -239,10 +235,7 @@ def run_radiology_vision_task(
             for image_input in image_inputs:
                 if DEBUG:
                     image_path = resolve_image_path(
-                        location=Path(os.path.join(
-                            INPUT_PATH,
-                            str(image_input["input_location"]),
-                        ))
+                        location=Path(str(INPUT_PATH) + str(image_input["input_location"]).replace("input/",""))
                     )
                 else:
                     image_path = resolve_image_path(location=image_input["input_location"])
@@ -283,10 +276,7 @@ def run_radiology_vision_task(
 
                 if DEBUG:
                     image_path = resolve_image_path(
-                        location=Path(os.path.join(
-                            INPUT_PATH,
-                            str(image_input["input_location"]),
-                        ))
+                        location=Path(str(INPUT_PATH) + str(image_input["input_location"]).replace("input/",""))
                     )
                 else:
                     image_path = resolve_image_path(location=image_input["input_location"])
