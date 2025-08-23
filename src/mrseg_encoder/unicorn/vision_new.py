@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 from typing import Any, Iterable
@@ -9,14 +10,24 @@ from mrsegmentator import config
 config.disable_nnunet_path_warnings()
 import sys
 
-from mrseg_encoder.main import encode_path
 from mrseg_encoder.unicorn.patch_extraction import extract_patches
-from mrseg_encoder.unicorn.vision import DEBUG
 from mrseg_encoder.inference import encode 
 from picai_prep.preprocessing import PreprocessingSettings, Sample
 from tqdm import tqdm
 from unicorn_baseline.io import resolve_image_path
 
+DEBUG = False
+
+if DEBUG:
+    INPUT_PATH = Path("/input")
+    OUTPUT_PATH = Path("/output")
+    MODEL_PATH = Path("/opt/ml/model")
+
+    def init(input_path, output_path, model_path):
+        global INPUT_PATH, OUTPUT_PATH, MODEL_PATH
+        INPUT_PATH = Path(input_path)
+        OUTPUT_PATH = Path(output_path)
+        MODEL_PATH = Path(model_path)
 
 def write_json_file(*, location, content):
 
@@ -58,18 +69,26 @@ def run(
 
     return 0
 
-def average_pairs(lst):
-    if len(lst) % 2 != 0:
-        raise ValueError("List length must be even.")
-    n = len(lst) // 2
-    return [(lst[2*i] + lst[2*i+1]) / 2.0 for i in range(n)]
+def get_target_spacing(image: sitk.Image, target_size) -> list[float]:
+
+    old_size = image.GetSize()
+    old_spacing = image.GetSpacing()
+    new_spacing = [
+        (old_spacing[i] * old_size[i]) / target_size[i]
+        for i in range(3)
+    ]
+
+    print("Image size:", old_size)
+    print("Image spacing:",old_spacing)
+    print("New spacing:", new_spacing)
+    return new_spacing
 
 def extract_features_segmentation(
     image,
     model_dir: str,
     domain: str,
     title: str = "patch-level-neural-representation",
-    patch_size: list[int] = [64, 64,64], # test case simply to check if it works
+    patch_size: list[int] = [64, 64,64],
     patch_spacing: list[float] | None = [1.0, 1.0,1.0],
     overlap_fraction: Iterable[float] = (0.0, 0.0, 0.0),
     compression_factor=20,
@@ -82,9 +101,9 @@ def extract_features_segmentation(
     image_orientation = sitk.DICOMOrientImageFilter_GetOrientationFromDirectionCosines(
         image.GetDirection()
     )
+
     if (image_orientation != "SPL") and (domain == "CT"):
         image = sitk.DICOMOrient(image, desiredCoordinateOrientation="SPL")
-
     if (image_orientation != "LPS") and (domain == "MR"):
         image = sitk.DICOMOrient(image, desiredCoordinateOrientation="LPS")
 
@@ -104,14 +123,12 @@ def extract_features_segmentation(
         zip(patches, coordinates), total=len(patches), desc="Extracting features", file=sys.stdout
     ):
          
+        # only show verbose output for the first patch
         if is_first:
             embeddings = encode(patch,verbose=True, compression_factor=compression_factor)
             is_first = False
         else:
             embeddings = encode(patch,verbose=False, compression_factor=compression_factor)
-
-        # if shorter_feautures:
-        #     embeddings = average_pairs(embeddings)
         
         patch_features.append(
             {
@@ -176,16 +193,18 @@ def run_radiology_vision_task(
         if input_socket["interface"]["kind"] == "Image":
             image_inputs.append(input_socket)
 
+    # T2 (single)
     if task_type == "classification":
 
-        outputs = []
+        neural_representations = []
+        image_representations = []
         for image_input in image_inputs:
 
             if DEBUG:
-                image_dir = Path(
-                    "/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn"
-                    + str(image_input["input_location"])
-                )
+                image_dir = Path(os.path.join(
+                    INPUT_PATH,
+                    str(image_input["input_location"]),
+                ))
             else:
                 image_dir = Path(image_input["input_location"])
 
@@ -193,12 +212,23 @@ def run_radiology_vision_task(
 
             if scan_path is None:
                 continue
-            neural_representation, _ = encode_path(scan_path)
-            neural_representation["title"] = image_input["interface"]["slug"]
-            outputs.append(neural_representation)
+
+            print(f"Reading image from {scan_path}")
+            image = sitk.ReadImage(str(scan_path))
+            image = sitk.DICOMOrient(image, desiredCoordinateOrientation="LPS")
+            embeddings = encode(image, verbose=True, compression_factor=20) # 128 features
+            image_level_neural_representation = {
+                "title": image_input["interface"]["slug"],
+                "features": embeddings,
+            }
+            image_representations.append(image_level_neural_representation)
+            continue
+
+        output_path = output_dir / "patch-neural-representation.json"
+        write_json_file(location=output_path, content=neural_representations)
 
         output_path = output_dir / "image-neural-representation.json"
-        write_json_file(location=output_path, content=outputs)
+        write_json_file(location=output_path, content=image_representations)
 
     elif task_type in ["detection", "segmentation"]:
         neural_representations = []
@@ -209,10 +239,10 @@ def run_radiology_vision_task(
             for image_input in image_inputs:
                 if DEBUG:
                     image_path = resolve_image_path(
-                        location=Path(
-                            "/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn"
-                            + str(image_input["input_location"])
-                        )
+                        location=Path(os.path.join(
+                            INPUT_PATH,
+                            str(image_input["input_location"]),
+                        ))
                     )
                 else:
                     image_path = resolve_image_path(location=image_input["input_location"])
@@ -253,10 +283,10 @@ def run_radiology_vision_task(
 
                 if DEBUG:
                     image_path = resolve_image_path(
-                        location=Path(
-                            "/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn"
-                            + str(image_input["input_location"])
-                        )
+                        location=Path(os.path.join(
+                            INPUT_PATH,
+                            str(image_input["input_location"]),
+                        ))
                     )
                 else:
                     image_path = resolve_image_path(location=image_input["input_location"])

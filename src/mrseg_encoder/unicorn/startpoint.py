@@ -1,3 +1,4 @@
+import os
 import torch
 import torchvision
 
@@ -5,14 +6,14 @@ torchvision.disable_beta_transforms_warning()
 
 from pathlib import Path
 
-from mrseg_encoder.unicorn import vision, vision_new
+from mrseg_encoder.unicorn import vision_new
 from unicorn_baseline.io import load_inputs, load_task_description
 
 INPUT_PATH = Path("/input")
 OUTPUT_PATH = Path("/output")
 MODEL_PATH = Path("/opt/ml/model")
 
-if vision.DEBUG:
+if vision_new.DEBUG:
     basepath = "/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn"
     INPUT_PATH = Path(basepath + "/input")
     OUTPUT_PATH = Path(basepath + "/output")
@@ -54,24 +55,12 @@ def run_vision_and_visionlanguage(input_dir: Path, model_dir: Path, output_dir: 
 
     if modality == "vision":
 
-        # run unicorn baseline task to generate empty output files
-        if task_type != "classification":
-            vision_new.run(
-                task_description=task_description,
-                input_information=input_information,
-                model_dir=model_dir,
-                output_dir=output_dir,
-            )
-        # run my own implementation for feature extraction only
-        # place features in previously generated files
-        else:
-            # run classification task
-            vision.run(
-                task_description=task_description,
-                input_information=input_information,
-                model_dir=model_dir,
-                output_dir=output_dir,
-            )
+        vision_new.run(
+            task_description=task_description,
+            input_information=input_information,
+            model_dir=model_dir,
+            output_dir=output_dir,
+        )
 
     elif modality == "vision-language":
         raise ValueError(
@@ -98,6 +87,26 @@ def run():
     else:
         return run_vision_and_visionlanguage(INPUT_PATH, MODEL_PATH, OUTPUT_PATH)
 
+
+def run_charite():
+    global INPUT_PATH, OUTPUT_PATH, MODEL_PATH
+    
+    task = 2    
+    INPUT_PATH = Path(f"/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn/Task{task}/shots-public")
+    OUTPUT_PATH = Path(f"/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn/Task{task}/embeddings")
+    MODEL_PATH = Path("/tmp")
+      
+    for _dir in os.listdir(INPUT_PATH):
+        INPUT_PATH = Path(f"/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn/Task{task}/shots-public/{_dir}")
+        OUTPUT_PATH = Path(f"/sc-scratch/sc-scratch-cc06-ag-ki-radiologie/unicorn/Task{task}/embeddings/{_dir}")
+        os.makedirs(OUTPUT_PATH,exist_ok=True)
+
+        vision_new.init(
+            input_path=INPUT_PATH,
+            output_path=OUTPUT_PATH,
+            model_path=MODEL_PATH,
+        )
+        run()
 
 if __name__ == "__main__":
 
