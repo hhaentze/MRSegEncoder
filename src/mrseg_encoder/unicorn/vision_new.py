@@ -16,7 +16,7 @@ from picai_prep.preprocessing import PreprocessingSettings, Sample
 from tqdm import tqdm
 from unicorn_baseline.io import resolve_image_path
 
-DEBUG = True
+DEBUG = False
 INPUT_PATH = Path("/input")
 OUTPUT_PATH = Path("/output")
 MODEL_PATH = Path("/opt/ml/model")
@@ -90,7 +90,8 @@ def extract_features_segmentation(
     patch_size: list[int] = [64, 64,64],
     patch_spacing: list[float] | None = [1.0, 1.0,1.0],
     overlap_fraction: Iterable[float] = (0.0, 0.0, 0.0),
-    compression_factor=20,
+    compression_factor: int = 20,
+    reduction_factor: int = 1,
 ) -> list[dict]:
     """
     Generate a list of patch features from a radiology image
@@ -100,11 +101,6 @@ def extract_features_segmentation(
     image_orientation = sitk.DICOMOrientImageFilter_GetOrientationFromDirectionCosines(
         image.GetDirection()
     )
-
-    if (image_orientation != "SPL") and (domain == "CT"):
-        image = sitk.DICOMOrient(image, desiredCoordinateOrientation="SPL")
-    if (image_orientation != "LPS") and (domain == "MR"):
-        image = sitk.DICOMOrient(image, desiredCoordinateOrientation="LPS")
 
     print(f"Extracting patches from image")
     patches, coordinates, image = extract_patches(
@@ -145,6 +141,7 @@ def extract_features_segmentation(
         image_spacing=image.GetSpacing(),
         image_direction=image.GetDirection(),
         title=title,
+        reduction_factor=reduction_factor,
     )
     return patch_level_neural_representation
 
@@ -159,11 +156,17 @@ def make_patch_level_neural_representation(
     image_spacing: Iterable[float],
     image_origin: Iterable[float] = None,
     image_direction: Iterable[float] = None,
+    reduction_factor: int = 1,
 ) -> dict:
     if image_origin is None:
         image_origin = [0.0] * len(image_size)
     if image_direction is None:
         image_direction = np.identity(len(image_size)).flatten().tolist()
+
+    # reduce resolution for upsampling adaptor
+    patch_size = [int(s//reduction_factor) for s in patch_size]
+    patch_spacing = [s*reduction_factor for s in patch_spacing]
+
     return {
         "meta": {
             "patch-size": list(patch_size),
@@ -212,7 +215,7 @@ def run_radiology_vision_task(
             print(f"Reading image from {scan_path}")
             image = sitk.ReadImage(str(scan_path))
             image = sitk.DICOMOrient(image, desiredCoordinateOrientation="LPS")
-            embeddings = encode(image, verbose=True, compression_factor=20) # 128 features
+            embeddings = encode(image, verbose=True, compression_factor=16) # 80 features
             image_level_neural_representation = {
                 "title": image_input["interface"]["slug"],
                 "features": embeddings,
@@ -255,8 +258,7 @@ def run_radiology_vision_task(
                     images_to_preprocess.get("t2"),
                     images_to_preprocess.get("hbv"),
                     images_to_preprocess.get("adc"),
-                ],
-                settings=PreprocessingSettings(spacing=[3, 1.5, 1.5], matrix_size=[16, 256, 256]),
+                ]
             )
             pat_case.preprocess()
 
@@ -267,8 +269,9 @@ def run_radiology_vision_task(
                     domain=domain,
                     title=title,
                     overlap_fraction=(0.5,0.5, 0.5),
-                    compression_factor=20,  # feature length of 128
-                )
+                    compression_factor=1,  # feature length of 2560
+                    reduction_factor=8,
+                                                    )
                 neural_representations.append(neural_representation)
 
         else:
@@ -281,17 +284,46 @@ def run_radiology_vision_task(
                 else:
                     image_path = resolve_image_path(location=image_input["input_location"])
                 print(f"Reading image from {image_path}")
-                image = sitk.ReadImage(str(image_path))
+                try:
+                    image = sitk.ReadImage(str(image_path))
+                except Exception as e:
+                    print(f"Error reading image {image_path}: {e}")
+                    continue
 
-                neural_representation = extract_features_segmentation(
-                    image=image,
-                    model_dir=model_dir,
-                    domain=domain,
-                    title=image_input["interface"]["slug"],
-                    # overlap_fraction=(0.0,0.0, 0.0) if task_type == "segmentation" else (0.5, 0.5, 0.5),
-                    overlap_fraction=(0.5,0.5,0.5),
-                    compression_factor= 20, # feature length of 128
-                )
+                if task_type == "detection": # Task 7
+                    neural_representation = extract_features_segmentation(
+                        image=image,
+                        model_dir=model_dir,
+                        domain=domain,
+                        title=image_input["interface"]["slug"],
+                        overlap_fraction=(0.5,0.5,0.5),
+                        compression_factor= 8, # feature length of 320
+                        reduction_factor= 8
+                    )
+                elif task_type == "segmentation" and domain == "CT": # Task 10
+                    neural_representation = extract_features_segmentation(
+                        image=image,
+                        model_dir=model_dir,
+                        domain=domain,
+                        title=image_input["interface"]["slug"],
+                        overlap_fraction=(0.5,0.5,0.5),
+                        compression_factor= 1, # feature length of 2560
+                        reduction_factor= 16
+                    )
+                elif task_type == "segmentation" and domain == "MR": # Task 11
+                    neural_representation = extract_features_segmentation(
+                        image=image,
+                        model_dir=model_dir,
+                        domain=domain,
+                        title=image_input["interface"]["slug"],
+                        overlap_fraction=(0.5,0.5,0.5),
+                        compression_factor= 1, # feature length of 2560
+                        reduction_factor= 16
+                    )
+                else:
+                    raise ValueError(f"Task type '{task_type}' not supported for domain '{domain}'.")
+
+
                 neural_representations.append(neural_representation)
 
         output_path = output_dir / "patch-neural-representation.json"
