@@ -269,8 +269,8 @@ def run_radiology_vision_task(
                     domain=domain,
                     title=title,
                     overlap_fraction=(0.5,0.5, 0.5),
-                    compression_factor=1,  # feature length of 2560
-                    reduction_factor=8,
+                    compression_factor=32,  # feature length of 80
+                    reduction_factor=4,
                                                     )
                 neural_representations.append(neural_representation)
 
@@ -307,8 +307,8 @@ def run_radiology_vision_task(
                         domain=domain,
                         title=image_input["interface"]["slug"],
                         overlap_fraction=(0.5,0.5,0.5),
-                        compression_factor= 1, # feature length of 2560
-                        reduction_factor= 16
+                        compression_factor= 16 , # feature length of 160
+                        reduction_factor= 4
                     )
                 elif task_type == "segmentation" and domain == "MR": # Task 11
                     neural_representation = extract_features_segmentation(
@@ -317,8 +317,8 @@ def run_radiology_vision_task(
                         domain=domain,
                         title=image_input["interface"]["slug"],
                         overlap_fraction=(0.5,0.5,0.5),
-                        compression_factor= 1, # feature length of 2560
-                        reduction_factor= 16
+                        compression_factor= 4, # feature length of 640
+                        reduction_factor= 4
                     )
                 else:
                     raise ValueError(f"Task type '{task_type}' not supported for domain '{domain}'.")
